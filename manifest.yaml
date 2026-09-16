@@ -1,0 +1,40 @@
+version: 0.1.0
+type: plugin
+author: richardxw
+name: user_memory
+label:
+  en_US: User Memory
+  zh_Hans: 用户长期记忆
+description:
+  en_US: Stores explicit user preferences and profile facts in Dify Plugin persistent KV storage.
+  zh_Hans: 将用户明确表达的偏好和画像事实保存到 Dify 插件持久化 KV 存储。
+icon: icon.svg
+resource:
+  memory: 268435456
+  permission:
+    tool:
+      enabled: false
+    model:
+      enabled: false
+    endpoint:
+      enabled: false
+    app:
+      enabled: false
+    storage:
+      enabled: true
+      size: 10485760
+plugins:
+  tools:
+    - provider/user_memory.yaml
+meta:
+  version: 0.1.0
+  arch:
+    - amd64
+    - arm64
+  runner:
+    language: python
+    version: "3.12"
+    entrypoint: main
+  minimum_dify_version: 1.9.0
+created_at: 2026-09-15T00:00:00.000000000+08:00
+privacy: PRIVACY.md
