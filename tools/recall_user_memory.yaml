@@ -1,0 +1,26 @@
+identity:
+  name: recall_user_memory
+  author: richardxw
+  label:
+    en_US: Recall User Memory
+    zh_Hans: 读取用户长期记忆
+description:
+  human:
+    en_US: Retrieves explicit user preferences and profile facts stored by this workspace.
+    zh_Hans: 读取当前工作区中已保存的用户明确偏好和画像事实。
+  llm: Retrieves the user's stored explicit preferences and profile facts for prompt context. Never infer missing facts.
+parameters:
+  - name: user_id
+    type: string
+    required: true
+    form: llm
+    label: {en_US: User ID, zh_Hans: 用户 ID}
+    human_description: {en_US: Stable Dify user ID, zh_Hans: 稳定的 Dify 用户 ID}
+    llm_description: The stable user identifier supplied by the application API, normally sys.user_id.
+output_schema:
+  type: object
+  properties:
+    memory_context: {type: string, description: JSON object of explicit stored facts.}
+extra:
+  python:
+    source: tools/recall_user_memory.py

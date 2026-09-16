@@ -1,0 +1,29 @@
+identity:
+  name: upsert_user_memory
+  author: richardxw
+  label: {en_US: Save User Memory, zh_Hans: 保存用户长期记忆}
+description:
+  human: {en_US: Saves an explicit stable preference or profile fact, zh_Hans: 保存用户明确表达的稳定偏好或画像事实。}
+  llm: Saves only an explicit, stable, non-sensitive user fact. Input must be JSON and must set should_store and explicit to true.
+parameters:
+  - name: user_id
+    type: string
+    required: true
+    form: llm
+    label: {en_US: User ID, zh_Hans: 用户 ID}
+    human_description: {en_US: Stable Dify user ID, zh_Hans: 稳定的 Dify 用户 ID}
+    llm_description: The stable user identifier supplied by the application API, normally sys.user_id.
+  - name: memory_json
+    type: string
+    required: true
+    form: llm
+    label: {en_US: Memory JSON, zh_Hans: 记忆 JSON}
+    human_description: {en_US: Structured memory candidate, zh_Hans: 结构化记忆候选内容}
+    llm_description: Strict JSON: {"should_store":true,"explicit":true,"key":"default_region|origin_region|residence_region|work_region|user_role|language|default_currency|response_preference","value":"short explicit user-stated value"}.
+output_schema:
+  type: object
+  properties:
+    result: {type: string, description: JSON write result.}
+extra:
+  python:
+    source: tools/upsert_user_memory.py

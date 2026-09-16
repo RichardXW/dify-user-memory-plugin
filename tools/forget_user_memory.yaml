@@ -1,0 +1,29 @@
+identity:
+  name: forget_user_memory
+  author: richardxw
+  label: {en_US: Forget User Memory, zh_Hans: 删除用户长期记忆}
+description:
+  human: {en_US: Deletes one explicit user memory by key, zh_Hans: 按字段删除一条用户长期记忆。}
+  llm: Deletes a stored memory only when the user explicitly asks to forget or remove it.
+parameters:
+  - name: user_id
+    type: string
+    required: true
+    form: llm
+    label: {en_US: User ID, zh_Hans: 用户 ID}
+    human_description: {en_US: Stable Dify user ID, zh_Hans: 稳定的 Dify 用户 ID}
+    llm_description: The stable user identifier supplied by the application API, normally sys.user_id.
+  - name: key
+    type: string
+    required: true
+    form: llm
+    label: {en_US: Memory key, zh_Hans: 记忆字段}
+    human_description: {en_US: One permitted memory key, zh_Hans: 允许删除的记忆字段}
+    llm_description: One of default_region, origin_region, residence_region, work_region, user_role, language, default_currency, response_preference.
+output_schema:
+  type: object
+  properties:
+    result: {type: string, description: JSON deletion result.}
+extra:
+  python:
+    source: tools/forget_user_memory.py
