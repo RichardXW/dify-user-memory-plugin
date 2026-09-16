@@ -1,0 +1,19 @@
+identity:
+  author: richardxw
+  name: user_memory
+  label:
+    en_US: User Memory
+    zh_Hans: 用户长期记忆
+  description:
+    en_US: Workspace-isolated persistent memory for explicit user preferences and profile facts.
+    zh_Hans: 基于工作区隔离的持久用户记忆，只保存明确的偏好和画像事实。
+  icon: icon.svg
+  tags:
+    - productivity
+tools:
+  - tools/recall_user_memory.yaml
+  - tools/upsert_user_memory.yaml
+  - tools/forget_user_memory.yaml
+extra:
+  python:
+    source: provider/user_memory.py
