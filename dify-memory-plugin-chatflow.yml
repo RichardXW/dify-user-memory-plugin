@@ -1,0 +1,255 @@
+app:
+  name: "双层记忆 Chatbot 演示"
+  mode: advanced-chat
+  icon: "🧠"
+  icon_type: emoji
+  icon_background: "#D5F5E3"
+  description: "短期会话记忆 + 用户长期记忆插件的可演示 Chatflow"
+  use_icon_as_answer_icon: false
+kind: app
+version: 0.1.5
+
+workflow:
+  # 这是会话级状态：跨同一个 conversation_id 的多轮对话有效。
+  # 跨会话长期记忆由已安装的 User Memory 插件负责。
+  conversation_variables:
+    - id: 8ab7b1f0-79a5-4a82-bb0f-8e7dfe5a1001
+      name: session_summary
+      selector: [conversation, session_summary]
+      value: ""
+      value_type: string
+      description: "可选：长会话摘要。演示版未自动更新。"
+  features:
+    opening_statement: "你好，我是记忆演示助手。请告诉我你的名字、偏好或目标；下一轮我会结合短期和长期记忆回答。"
+    suggested_questions:
+      - "我叫小王，准备 Java 后端面试，请记住。"
+      - "我的目标是什么？"
+    suggested_questions_after_answer:
+      enabled: false
+    file_upload:
+      enabled: false
+      allowed_file_types: [image]
+      allowed_file_extensions: [.JPG, .JPEG, .PNG, .GIF, .WEBP]
+      allowed_file_upload_methods: [local_file, remote_url]
+      fileUploadConfig:
+        file_size_limit: 15
+        batch_count_limit: 5
+        image_file_size_limit: 10
+        video_file_size_limit: 100
+        audio_file_size_limit: 50
+        workflow_file_upload_limit: 10
+    image:
+      enabled: false
+      number_limits: 3
+      transfer_methods: [local_file, remote_url]
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    text_to_speech:
+      enabled: false
+    language: ""
+    voice: ""
+  graph:
+    nodes:
+      - id: start
+        type: custom
+        position: {x: 40, y: 280}
+        positionAbsolute: {x: 40, y: 280}
+        width: 244
+        height: 54
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: start
+          title: 开始
+          desc: "sys.user_id 由 Dify API 调用的 user 字段提供。"
+          variables: []
+
+      - id: recall_memory
+        type: custom
+        position: {x: 350, y: 280}
+        positionAbsolute: {x: 350, y: 280}
+        width: 244
+        height: 150
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: tool
+          title: 召回长期记忆
+          desc: "读取当前工作区中已保存的用户明确偏好和画像事实。"
+          provider_id: richardxw/user_memory/user_memory
+          provider_name: richardxw/user_memory/user_memory
+          provider_type: builtin
+          tool_name: recall_user_memory
+          tool_label: 读取用户长期记忆
+          tool_description: 读取当前工作区中已保存的用户明确偏好和画像事实。
+          tool_node_version: '2'
+          tool_configurations: {}
+          tool_parameters:
+            user_id:
+              type: mixed
+              value: "{{#sys.user_id#}}"
+          is_team_authorization: true
+
+      - id: answer_llm
+        type: custom
+        position: {x: 660, y: 280}
+        positionAbsolute: {x: 660, y: 280}
+        width: 244
+        height: 170
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 使用双层记忆回答
+          desc: "短期：memory.window 自动注入最近 8 轮。长期：插件召回结果注入系统提示词。"
+          model:
+            provider: langgenius/openai/openai
+            name: gpt-4o-mini
+            mode: chat
+            completion_params: {temperature: 0.3}
+          prompt_template:
+            - id: 8ab7b1f0-79a5-4a82-bb0f-8e7dfe5a2001
+              role: system
+              edition_type: basic
+              text: |
+                你是一个可靠的中文助手。
+
+                【长期记忆检索结果】
+                {{#recall_memory.memory_context#}}
+
+                使用规则：仅在长期记忆与当前问题相关且不冲突时使用；若用户本轮说法冲突，以本轮为准；不要声称知道未提供的信息，也不要泄露记忆库实现。
+            - id: 8ab7b1f0-79a5-4a82-bb0f-8e7dfe5a2002
+              role: user
+              edition_type: basic
+              text: "{{#sys.query#}}"
+          context: {enabled: false, variable_selector: []}
+          memory:
+            query_prompt_template: "{{#sys.query#}}"
+            role_prefix: {user: "用户", assistant: "助手"}
+            window: {enabled: true, size: 8}
+          vision: {enabled: false}
+          variables: []
+
+      - id: extract_memory
+        type: custom
+        position: {x: 970, y: 280}
+        positionAbsolute: {x: 970, y: 280}
+        width: 244
+        height: 155
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 抽取候选长期记忆
+          desc: "只抽取高价值、明确、可跨会话复用的用户事实。"
+          model:
+            provider: langgenius/openai/openai
+            name: gpt-4o-mini
+            mode: chat
+            completion_params: {temperature: 0.0}
+          prompt_template:
+            - id: 8ab7b1f0-79a5-4a82-bb0f-8e7dfe5a3001
+              role: system
+              edition_type: basic
+              text: |
+                从用户这句话中提取值得跨会话保存的记忆。只保留用户明确陈述的稳定身份、偏好、目标、约束或待办。
+                不要保存寒暄、一次性问题、推测、密码、令牌、身份证号、银行卡号、医疗隐私。
+                严格返回 JSON，不要 Markdown：
+                {"should_store":true,"type":"profile|preference|goal|task","content":"...","importance":0.0}
+                若没有可保存内容：{"should_store":false,"type":"","content":"","importance":0.0}
+            - id: 8ab7b1f0-79a5-4a82-bb0f-8e7dfe5a3002
+              role: user
+              edition_type: basic
+              text: "用户消息：{{#sys.query#}}"
+          context: {enabled: false, variable_selector: []}
+          memory:
+            query_prompt_template: "{{#sys.query#}}"
+            role_prefix: {user: "", assistant: ""}
+            window: {enabled: false, size: 1}
+          vision: {enabled: false}
+          variables: []
+
+      - id: store_memory
+        type: custom
+        position: {x: 1280, y: 280}
+        positionAbsolute: {x: 1280, y: 280}
+        width: 244
+        height: 150
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: tool
+          title: 写入长期记忆
+          desc: "仅保存用户明确表达的稳定偏好；should_store=false 时插件会忽略。"
+          provider_id: richardxw/user_memory/user_memory
+          provider_name: richardxw/user_memory/user_memory
+          provider_type: builtin
+          tool_name: upsert_user_memory
+          tool_label: 保存用户长期记忆
+          tool_description: 仅保存用户明确表达的稳定、非敏感事实。
+          tool_node_version: '2'
+          tool_configurations: {}
+          tool_parameters:
+            user_id:
+              type: mixed
+              value: "{{#sys.user_id#}}"
+            memory_json:
+              type: mixed
+              value: "{{#extract_memory.text#}}"
+          is_team_authorization: true
+
+      - id: answer
+        type: custom
+        position: {x: 1590, y: 280}
+        positionAbsolute: {x: 1590, y: 280}
+        width: 244
+        height: 100
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: answer
+          title: 回复用户
+          desc: ""
+          answer: "{{#answer_llm.text#}}"
+          variables: []
+    edges:
+      - id: start-recall
+        type: custom
+        source: start
+        sourceHandle: source
+        target: recall_memory
+        targetHandle: target
+        data: {sourceType: start, targetType: tool, isInIteration: false}
+      - id: recall-answer-llm
+        type: custom
+        source: recall_memory
+        sourceHandle: source
+        target: answer_llm
+        targetHandle: target
+        data: {sourceType: tool, targetType: llm, isInIteration: false}
+      - id: answer-llm-extract
+        type: custom
+        source: answer_llm
+        sourceHandle: source
+        target: extract_memory
+        targetHandle: target
+        data: {sourceType: llm, targetType: llm, isInIteration: false}
+      - id: extract-store
+        type: custom
+        source: extract_memory
+        sourceHandle: source
+        target: store_memory
+        targetHandle: target
+        data: {sourceType: llm, targetType: tool, isInIteration: false}
+      - id: answer-llm-answer
+        type: custom
+        source: answer_llm
+        sourceHandle: source
+        target: answer
+        targetHandle: target
+        data: {sourceType: llm, targetType: answer, isInIteration: false}
+    viewport: {x: 0, y: 0, zoom: 0.7}
