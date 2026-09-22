@@ -1,0 +1,458 @@
+app:
+  name: "金融问答演示：PostgreSQL 长期记忆"
+  mode: advanced-chat
+  icon: "📈"
+  icon_type: emoji
+  icon_background: "#E8F4FD"
+  description: "演示 PostgreSQL 长期记忆、FAQ 识别、知识检索和地区补充问答。"
+  use_icon_as_answer_icon: false
+kind: app
+version: 0.1.5
+
+workflow:
+  conversation_variables:
+    - id: 4b05da01-6e73-4a48-a1f7-1e490d8c0001
+      name: pending_question
+      selector: [conversation, pending_question]
+      value: ""
+      value_type: string
+      description: "尚缺参数、等待用户补充的原始问题。"
+  environment_variables:
+    - id: 4b05da01-6e73-4a48-a1f7-1e490d8c0002
+      name: MEMORY_API_BASE_URL
+      selector: [env, MEMORY_API_BASE_URL]
+      value: "https://YOUR-MEMORY-API.example.com"
+      value_type: string
+      description: "内部 Memory API 地址。该服务读写 Azure PostgreSQL，不要填写数据库连接串。"
+  features:
+    opening_statement: ""
+    suggested_questions: []
+    suggested_questions_after_answer: {enabled: false}
+    file_upload:
+      enabled: false
+      allowed_file_types: [image]
+      allowed_file_extensions: [.JPG, .JPEG, .PNG, .GIF, .WEBP]
+      allowed_file_upload_methods: [local_file, remote_url]
+      fileUploadConfig: {file_size_limit: 15, batch_count_limit: 5, image_file_size_limit: 10, video_file_size_limit: 100, audio_file_size_limit: 50, workflow_file_upload_limit: 10}
+    image: {enabled: false, number_limits: 3, transfer_methods: [local_file, remote_url]}
+    retriever_resource: {enabled: true}
+    sensitive_word_avoidance: {enabled: false}
+    speech_to_text: {enabled: false}
+    text_to_speech: {enabled: false}
+    language: ""
+    voice: ""
+  graph:
+    nodes:
+      - id: start
+        type: custom
+        position: {x: 30, y: 280}
+        positionAbsolute: {x: 30, y: 280}
+        width: 244
+        height: 54
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: start
+          title: 开始
+          desc: "演示时，新开对话后填写同一个测试用户 ID，即可读回同一份 PostgreSQL 长期记忆。"
+          variables:
+            - variable: demo_user_id
+              label: 测试用户 ID
+              type: text-input
+              required: true
+              max_length: 64
+              options: []
+              default: "demo-xiaowang"
+              description: "例如 demo-xiaowang。仅用于演示，请勿填写手机号或身份证号。"
+
+      - id: build_route_context
+        type: custom
+        position: {x: 320, y: 280}
+        positionAbsolute: {x: 320, y: 280}
+        width: 244
+        height: 90
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: template-transform
+          title: 组装路由上下文
+          desc: "将未完成问题放入路由判断，保证用户只回复“华东”时仍进入金融补槽链路。"
+          template: "长期记忆：{{ long_memory }}\n待补充问题：{{ pending }}\n本轮输入：{{ query }}"
+          variables:
+            - variable: long_memory
+              value_selector: [recall_memory, body]
+            - variable: pending
+              value_selector: [conversation, pending_question]
+            - variable: query
+              value_selector: [sys, query]
+
+      - id: recall_memory
+        type: custom
+        position: {x: 170, y: 280}
+        positionAbsolute: {x: 170, y: 280}
+        width: 244
+        height: 145
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: http-request
+          title: 召回跨会话长期记忆
+          desc: "通过 Memory API 从 Azure PostgreSQL 读取同一用户的默认地区、身份和称呼。"
+          method: get
+          url: "{{#env.MEMORY_API_BASE_URL#}}/v1/memories/search"
+          authorization: {type: no-auth, config: null}
+          headers: "Accept:application/json"
+          params: "user_id:{{#start.demo_user_id#}}\nquery:{{#sys.query#}}\ntop_k:3"
+          body: {type: none, data: []}
+          retry_config: {retry_enabled: true, max_retries: 1, retry_interval: 500}
+          timeout: {max_connect_timeout: 10, max_read_timeout: 15, max_write_timeout: 15}
+          variables: []
+
+      - id: faq_router
+        type: custom
+        position: {x: 610, y: 280}
+        positionAbsolute: {x: 610, y: 280}
+        width: 244
+        height: 190
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: question-classifier
+          title: FAQ / 金融问题识别
+          desc: "当待补充问题不为空，必须归类到 financial。"
+          model:
+            provider: azure_openai
+            name: gpt-5.4-mini
+            mode: chat
+            completion_params: {temperature: 0}
+          query_variable_selector: [build_route_context, output]
+          instruction: "若待补充问题不为空，无论本轮输入多短，都归类 financial。仅产品使用、权限、数据更新、名词解释等固定问答归 FAQ；指标、年份、地区、金额、报表、同比等归 financial。"
+          classes:
+            - id: faq
+              name: FAQ：产品与口径固定问答
+            - id: financial
+              name: 金融数据查询或未完成的补充回答
+          topics: []
+
+      - id: faq_retrieval
+        type: custom
+        position: {x: 920, y: 80}
+        positionAbsolute: {x: 920, y: 80}
+        width: 244
+        height: 110
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: knowledge-retrieval
+          title: FAQ 知识检索
+          desc: "导入后在节点中选择 FAQ 知识库。"
+          dataset_ids: []
+          query_variable_selector: [sys, query]
+          retrieval_mode: multiple
+          multiple_retrieval_config: {top_k: 3, reranking_enable: false, score_threshold_enabled: true, score_threshold: 0.45}
+          metadata_filtering_mode: disabled
+
+      - id: faq_answer_llm
+        type: custom
+        position: {x: 1230, y: 80}
+        positionAbsolute: {x: 1230, y: 80}
+        width: 244
+        height: 140
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: FAQ 作答
+          desc: ""
+          model: {provider: azure_openai, name: gpt-5.4, mode: chat, completion_params: {temperature: 0.2}}
+          prompt_template:
+            - id: 4b05da01-6e73-4a48-a1f7-1e490d8c1001
+              role: system
+              edition_type: basic
+              text: "仅依据 <context> 中内容回答 FAQ。没有证据时明确说明未找到，不要编造。"
+            - id: 4b05da01-6e73-4a48-a1f7-1e490d8c1002
+              role: user
+              edition_type: basic
+              text: "{{#sys.query#}}"
+          context: {enabled: true, variable_selector: [faq_retrieval, result]}
+          memory: {query_prompt_template: "{{#sys.query#}}", role_prefix: {user: "用户", assistant: "助手"}, window: {enabled: true, size: 8}}
+          vision: {enabled: false}
+          variables: []
+
+      - id: extract_slots
+        type: custom
+        position: {x: 920, y: 400}
+        positionAbsolute: {x: 920, y: 400}
+        width: 244
+        height: 180
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: parameter-extractor
+          title: 抽取金融查询槽位
+          desc: "利用最近 8 轮会话，在用户补充地区后继续保留前一轮的年份与指标。"
+          model: {provider: azure_openai, name: gpt-5.4-mini, mode: chat, completion_params: {temperature: 0}}
+          query: [sys, query]
+          reasoning_mode: prompt
+          instruction: |
+            抽取金融查询的指标、年份和地区。必须结合最近对话：若本轮只是地区（例如“华东”），从上一轮未完成问题继承指标和年份。
+            若以下长期记忆给出了用户明确的默认地区/市场，且用户本轮没有指定地区，可使用该默认值；用户本轮指定的值优先。
+            长期记忆：{{#recall_memory.body#}}
+            地区必须是业务定义的统计地区/市场；不确定就留空。
+          parameters:
+            - {name: metric, type: string, required: false, description: "金融指标名称或代码，例如 VONB"}
+            - {name: year, type: string, required: false, description: "年份，例如 2023"}
+            - {name: region, type: string, required: false, description: "统计地区/市场，例如 华东、上海、中国境内"}
+          memory: {window: {enabled: true, size: 8}}
+          variables: []
+
+      - id: region_missing
+        type: custom
+        position: {x: 1230, y: 400}
+        positionAbsolute: {x: 1230, y: 400}
+        width: 244
+        height: 135
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: if-else
+          title: 是否缺少必要槽位
+          desc: "示例要求指标、年份、地区均完整；实际业务还可加机构、币种、合并口径。"
+          cases:
+            - case_id: missing_region
+              logical_operator: or
+              conditions:
+                - id: 4b05da01-6e73-4a48-a1f7-1e490d8c2001
+                  variable_selector: [extract_slots, region]
+                  comparison_operator: empty
+                  value: ""
+                  varType: string
+                - id: 4b05da01-6e73-4a48-a1f7-1e490d8c2002
+                  variable_selector: [extract_slots, metric]
+                  comparison_operator: empty
+                  value: ""
+                  varType: string
+                - id: 4b05da01-6e73-4a48-a1f7-1e490d8c2003
+                  variable_selector: [extract_slots, year]
+                  comparison_operator: empty
+                  value: ""
+                  varType: string
+
+      - id: save_pending
+        type: custom
+        position: {x: 1530, y: 350}
+        positionAbsolute: {x: 1530, y: 350}
+        width: 244
+        height: 100
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: assigner
+          title: 保存待补充问题
+          desc: ""
+          version: "2"
+          items:
+            - variable_selector: [conversation, pending_question]
+              input_type: variable
+              value: [sys, query]
+              operation: over-write
+              write_mode: over-write
+
+      - id: ask_region
+        type: custom
+        position: {x: 1830, y: 350}
+        positionAbsolute: {x: 1830, y: 350}
+        width: 244
+        height: 100
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: answer
+          title: 追问缺失参数
+          desc: ""
+          answer: "为准确查询，请补充指标、年份和地区/市场信息。例如：2023 年 VONB，华东地区。"
+          variables: []
+
+      - id: build_financial_query
+        type: custom
+        position: {x: 1530, y: 520}
+        positionAbsolute: {x: 1530, y: 520}
+        width: 244
+        height: 100
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: template-transform
+          title: 生成检索问题
+          desc: ""
+          template: "查询 {{ metric }} 在 {{ region }} 地区 {{ year }} 年的数值、定义、单位及来源。"
+          variables:
+            - {variable: metric, value_selector: [extract_slots, metric]}
+            - {variable: year, value_selector: [extract_slots, year]}
+            - {variable: region, value_selector: [extract_slots, region]}
+
+      - id: financial_retrieval
+        type: custom
+        position: {x: 1830, y: 520}
+        positionAbsolute: {x: 1830, y: 520}
+        width: 244
+        height: 110
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: knowledge-retrieval
+          title: 金融知识检索
+          desc: "导入后选择金融指标/报表知识库；建议为年份、地区、指标设置元数据。"
+          dataset_ids: []
+          query_variable_selector: [build_financial_query, output]
+          retrieval_mode: multiple
+          multiple_retrieval_config: {top_k: 5, reranking_enable: false, score_threshold_enabled: true, score_threshold: 0.35}
+          metadata_filtering_mode: disabled
+
+      - id: financial_answer_llm
+        type: custom
+        position: {x: 2140, y: 520}
+        positionAbsolute: {x: 2140, y: 520}
+        width: 244
+        height: 140
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 基于证据作答
+          desc: ""
+          model: {provider: azure_openai, name: gpt-5.4, mode: chat, completion_params: {temperature: 0.1}}
+          prompt_template:
+            - id: 4b05da01-6e73-4a48-a1f7-1e490d8c3001
+              role: system
+              edition_type: basic
+              text: "依据 <context> 作答。先给数值，再给单位、地区、年份和口径。若检索结果未充分支持数值，明确说数据不足，不能臆造；可提出一个具体补充问题。"
+            - id: 4b05da01-6e73-4a48-a1f7-1e490d8c3002
+              role: user
+              edition_type: basic
+              text: "{{#build_financial_query.output#}}"
+          context: {enabled: true, variable_selector: [financial_retrieval, result]}
+          memory: {query_prompt_template: "{{#build_financial_query.output#}}", role_prefix: {user: "用户", assistant: "助手"}, window: {enabled: true, size: 8}}
+          vision: {enabled: false}
+          variables: []
+
+      - id: clear_pending
+        type: custom
+        position: {x: 2450, y: 520}
+        positionAbsolute: {x: 2450, y: 520}
+        width: 244
+        height: 90
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: assigner
+          title: 清理待补充状态
+          desc: ""
+          version: "2"
+          items:
+            - variable_selector: [conversation, pending_question]
+              input_type: constant
+              value: ""
+              operation: over-write
+              write_mode: over-write
+
+      - id: financial_answer
+        type: custom
+        position: {x: 2760, y: 520}
+        positionAbsolute: {x: 2760, y: 520}
+        width: 244
+        height: 100
+        sourcePosition: right
+        targetPosition: left
+        data: {type: answer, title: 金融回复, desc: "", answer: "{{#financial_answer_llm.text#}}", variables: []}
+
+      - id: extract_long_memory
+        type: custom
+        position: {x: 2450, y: 700}
+        positionAbsolute: {x: 2450, y: 700}
+        width: 244
+        height: 145
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: llm
+          title: 提取长期记忆
+          desc: "只保存用户主动说明、跨会话仍有价值的默认地区、身份或称呼。"
+          model: {provider: azure_openai, name: gpt-5.4-mini, mode: chat, completion_params: {temperature: 0}}
+          prompt_template:
+            - id: 4b05da01-6e73-4a48-a1f7-1e490d8c4001
+              role: system
+              edition_type: basic
+              text: |
+                严格输出 JSON，不要 Markdown。
+                只保存用户明确说出的、跨会话可复用的三类信息：
+                default_region（默认查询地区）、user_role（业务身份）、preferred_name（称呼）。
+                输出格式：[ {"memory_key":"default_region|user_role|preferred_name","memory_value":"..."} ]。
+                没有可保存内容时输出：[]。
+                不要猜测；不要保存查询结果、一次性问题、手机号、地址、证件号或账号。
+            - id: 4b05da01-6e73-4a48-a1f7-1e490d8c4002
+              role: user
+              edition_type: basic
+              text: "用户本轮消息：{{#sys.query#}}"
+          context: {enabled: false, variable_selector: []}
+          memory: {query_prompt_template: "{{#sys.query#}}", role_prefix: {user: "", assistant: ""}, window: {enabled: false, size: 1}}
+          vision: {enabled: false}
+          variables: []
+
+      - id: store_long_memory
+        type: custom
+        position: {x: 2760, y: 700}
+        positionAbsolute: {x: 2760, y: 700}
+        width: 244
+        height: 145
+        sourcePosition: right
+        targetPosition: left
+        data:
+          type: http-request
+          title: 写入跨会话长期记忆
+          desc: "Memory API 将合规记忆写入 Azure PostgreSQL 的 chatbot.user_memory 表。"
+          method: post
+          url: "{{#env.MEMORY_API_BASE_URL#}}/v1/memories/upsert"
+          authorization: {type: no-auth, config: null}
+          headers: "Content-Type:application/json"
+          params: ""
+          body:
+            type: raw-text
+            data:
+              - id: long-memory-payload
+                key: ""
+                type: text
+                value: "{\"user_id\":\"{{#start.demo_user_id#}}\",\"items\":{{#extract_long_memory.text#}}}"
+          retry_config: {retry_enabled: true, max_retries: 1, retry_interval: 500}
+          timeout: {max_connect_timeout: 10, max_read_timeout: 15, max_write_timeout: 15}
+          variables: []
+
+      - id: faq_answer
+        type: custom
+        position: {x: 1540, y: 80}
+        positionAbsolute: {x: 1540, y: 80}
+        width: 244
+        height: 100
+        sourcePosition: right
+        targetPosition: left
+        data: {type: answer, title: FAQ 回复, desc: "", answer: "{{#faq_answer_llm.text#}}", variables: []}
+    edges:
+      - {id: start-recall-memory, type: custom, source: start, sourceHandle: source, target: recall_memory, targetHandle: target, data: {sourceType: start, targetType: http-request, isInIteration: false}}
+      - {id: recall-memory-route-context, type: custom, source: recall_memory, sourceHandle: source, target: build_route_context, targetHandle: target, data: {sourceType: http-request, targetType: template-transform, isInIteration: false}}
+      - {id: route-context-router, type: custom, source: build_route_context, sourceHandle: source, target: faq_router, targetHandle: target, data: {sourceType: template-transform, targetType: question-classifier, isInIteration: false}}
+      - {id: router-faq, type: custom, source: faq_router, sourceHandle: faq, target: faq_retrieval, targetHandle: target, data: {sourceType: question-classifier, targetType: knowledge-retrieval, isInIteration: false}}
+      - {id: faq-retrieval-answer-llm, type: custom, source: faq_retrieval, sourceHandle: source, target: faq_answer_llm, targetHandle: target, data: {sourceType: knowledge-retrieval, targetType: llm, isInIteration: false}}
+      - {id: faq-llm-answer, type: custom, source: faq_answer_llm, sourceHandle: source, target: faq_answer, targetHandle: target, data: {sourceType: llm, targetType: answer, isInIteration: false}}
+      - {id: faq-llm-extract-long-memory, type: custom, source: faq_answer_llm, sourceHandle: source, target: extract_long_memory, targetHandle: target, data: {sourceType: llm, targetType: llm, isInIteration: false}}
+      - {id: router-financial, type: custom, source: faq_router, sourceHandle: financial, target: extract_slots, targetHandle: target, data: {sourceType: question-classifier, targetType: parameter-extractor, isInIteration: false}}
+      - {id: extract-region-check, type: custom, source: extract_slots, sourceHandle: source, target: region_missing, targetHandle: target, data: {sourceType: parameter-extractor, targetType: if-else, isInIteration: false}}
+      - {id: missing-save, type: custom, source: region_missing, sourceHandle: missing_region, target: save_pending, targetHandle: target, data: {sourceType: if-else, targetType: assigner, isInIteration: false}}
+      - {id: save-ask, type: custom, source: save_pending, sourceHandle: source, target: ask_region, targetHandle: target, data: {sourceType: assigner, targetType: answer, isInIteration: false}}
+      - {id: complete-build-query, type: custom, source: region_missing, sourceHandle: false, target: build_financial_query, targetHandle: target, data: {sourceType: if-else, targetType: template-transform, isInIteration: false}}
+      - {id: query-retrieval, type: custom, source: build_financial_query, sourceHandle: source, target: financial_retrieval, targetHandle: target, data: {sourceType: template-transform, targetType: knowledge-retrieval, isInIteration: false}}
+      - {id: retrieval-answer-llm, type: custom, source: financial_retrieval, sourceHandle: source, target: financial_answer_llm, targetHandle: target, data: {sourceType: knowledge-retrieval, targetType: llm, isInIteration: false}}
+      - {id: answer-llm-clear, type: custom, source: financial_answer_llm, sourceHandle: source, target: clear_pending, targetHandle: target, data: {sourceType: llm, targetType: assigner, isInIteration: false}}
+      - {id: answer-llm-extract-long-memory, type: custom, source: financial_answer_llm, sourceHandle: source, target: extract_long_memory, targetHandle: target, data: {sourceType: llm, targetType: llm, isInIteration: false}}
+      - {id: extract-store-long-memory, type: custom, source: extract_long_memory, sourceHandle: source, target: store_long_memory, targetHandle: target, data: {sourceType: llm, targetType: http-request, isInIteration: false}}
+      - {id: clear-answer, type: custom, source: clear_pending, sourceHandle: source, target: financial_answer, targetHandle: target, data: {sourceType: assigner, targetType: answer, isInIteration: false}}
+    viewport: {x: 0, y: 0, zoom: 0.45}
